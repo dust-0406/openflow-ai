@@ -1,16 +1,13 @@
-
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-
+from app import database
+from app.services import ai_service
+from fastapi.responses import HTMLResponse
 app = FastAPI(
     title="OpenFlow AI",
     description="An open-source AI automation platform",
     version="0.1.0",
 )
-
-tasks = []
-next_id = 1
 
 
 class TaskInput(BaseModel):
@@ -138,47 +135,76 @@ def home():
     </html>
     """
 
+from pydantic import BaseModel
+
+
+class SummaryRequest(BaseModel):
+    text: str
+
+
+@app.post("/api/ai/summarize")
+def summarize(request: SummaryRequest):
+
+    result = ai_service.summarize_text(
+        request.text
+    )
+
+    return result
 
 @app.get("/api/health")
 def health():
-    return {"status": "healthy", "project": "OpenFlow AI"}
+    return {
+        "status": "healthy",
+        "project": "OpenFlow AI",
+        "database": "sqlite",
+    }
 
 
 @app.get("/api/tasks")
 def get_tasks():
-    return tasks
+    return database.get_all_tasks()
 
 
 @app.post("/api/tasks", status_code=201)
 def create_task(task: TaskInput):
-    global next_id
+    title = task.title.strip()
 
-    item = {
-        "id": next_id,
-        "title": task.title.strip(),
-        "done": False,
-    }
-    next_id += 1
-    tasks.append(item)
-    return item
+    if not title:
+        raise HTTPException(
+            status_code=400,
+            detail="Task title cannot be empty",
+        )
+
+    return database.add_task(title)
 
 
 @app.patch("/api/tasks/{task_id}")
-def toggle_task(task_id: int):
-    for task in tasks:
-        if task["id"] == task_id:
-            task["done"] = not task["done"]
-            return task
+def update_task(task_id: int):
+    task = database.toggle_task(task_id)
 
-    from fastapi import HTTPException
-    raise HTTPException(status_code=404, detail="Task not found")
+    if task is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Task not found",
+        )
+
+    return task
 
 
 @app.delete("/api/tasks/{task_id}")
 def delete_task(task_id: int):
-    for index, task in enumerate(tasks):
-        if task["id"] == task_id:
-            return tasks.pop(index)
+    task = database.remove_task(task_id)
 
-    from fastapi import HTTPException
-    raise HTTPException(status_code=404, detail="Task not found")
+    if task is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Task not found",
+        )
+
+    return task
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
+
